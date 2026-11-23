@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 
+from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.test.utils import override_settings
@@ -41,10 +42,11 @@ from inventory.models import Inventory
 from inventory.services import build_inventory_sheet, finalize_inventory
 from warehouse.models import (InboundDocument, InboundItem, Material, Order,
                               OutboundDocument, OutboundItem, PriceHistory,
-                              Product, ProductionRun, StockMovement,
-                              Supplier, Unit, Warehouse)
+                              Product, ProductionRun, ProductPhoto,
+                              StockMovement, Supplier, Unit, Warehouse)
 from warehouse.order_services import (cancel_order, confirm_order,
                                       create_order, ship_order)
+from warehouse.demo_images import render
 from warehouse.services import (process_inbound_document,
                                 process_outbound_document, produce_product)
 
@@ -130,6 +132,15 @@ PRODUCTS = {
     'oldrun': ('КР-000-42', 'Кроссовки «Старт» (прошлая модель)', 'shoes',
                '42', 'белый', 1500, 2990,
                'Снята с производства, остатки распродаются.'),
+}
+
+# Что нарисовать для товара и сколько ракурсов: у обуви, одежды и сумки
+# второй снимок есть, чтобы в карточке на витрине была галерея
+PICTURES = {
+    'run41': ('sneaker', 2), 'run42': ('sneaker', 2), 'run43': ('sneaker', 2),
+    'boot40': ('boot', 2), 'boot42': ('boot', 2),
+    'hoodieM': ('hoodie', 2), 'hoodieL': ('hoodie', 2), 'bag': ('bag', 2),
+    'insole': ('insoles', 1), 'mat': ('mat', 1), 'oldrun': ('sneaker', 1),
 }
 
 COUNTERPARTIES = {
@@ -363,6 +374,7 @@ class Command(BaseCommand):
             description=text)
             for key, (article, name, category, size, color, cost, price, text)
             in PRODUCTS.items()}
+        self.pictures()
 
         self.cp = {key: Counterparty.objects.create(
             short_name=name, inn=inn, kpp=kpp, legal_address=address,
@@ -386,6 +398,29 @@ class Command(BaseCommand):
                 director_name='Петров П. П.',
                 accountant_name='Сидорова С. С.')
             self.requisites_created = True
+
+    def pictures(self):
+        """Обложка и дополнительные ракурсы для каждого товара.
+
+        Одинаковые товары разных размеров рисуются одинаково — у
+        настоящих снимков было бы так же. Рисунок готовится один раз на
+        модель и цвет, а не на каждый размер.
+        """
+        drawn = {}
+        for key, product in self.prod.items():
+            kind, views = PICTURES[key]
+            for view in range(views):
+                look = (kind, product.color, view)
+                if look not in drawn:
+                    drawn[look] = render(*look)
+                name = f'demo-{key}-{view + 1}.jpg'
+                if view == 0:
+                    product.photo.save(name, ContentFile(drawn[look]),
+                                       save=True)
+                else:
+                    extra = ProductPhoto(product=product, sort_order=view)
+                    extra.image.save(name, ContentFile(drawn[look]),
+                                     save=True)
 
     def inbound(self, number, ago, supplier, warehouse, rows, post=True):
         doc = InboundDocument.objects.create(

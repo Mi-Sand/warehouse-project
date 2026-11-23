@@ -4,22 +4,24 @@
 в ней. Если остатки в них не сходятся с журналом или страница падает,
 это выглядит как ошибка учёта, а не наполнения.
 """
+import shutil
+import tempfile
 from decimal import Decimal
-from io import StringIO
+from io import BytesIO, StringIO
 
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db.models import Sum
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from billing.models import Counterparty, Payment
 from inventory.models import Inventory
 
-from .models import (InboundDocument, Material, Order, Product, ProductionRun,
-                     Stock, StockMovement, Warehouse)
+from .models import (InboundDocument, Material, Order, Product, ProductPhoto,
+                     ProductionRun, Stock, StockMovement, Warehouse)
 
 User = get_user_model()
 
@@ -30,7 +32,16 @@ def run():
     return out.getvalue()
 
 
+MEDIA = tempfile.mkdtemp(prefix='проверка-демо-')
+
+
+@override_settings(MEDIA_ROOT=MEDIA)
 class DemoDataTests(TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(MEDIA, ignore_errors=True)
+
     def test_fills_everything_but_employees(self):
         admin = User.objects.create_superuser('admin', password='x')
 
@@ -104,6 +115,24 @@ class DemoDataTests(TestCase):
         with self.assertRaises(CommandError):
             run()
         self.assertEqual(Material.objects.count(), before)
+
+    def test_every_product_has_a_picture(self):
+        from PIL import Image
+
+        run()
+        self.assertFalse(Product.objects.filter(photo='').exists())
+        self.assertTrue(ProductPhoto.objects.exists())
+        product = Product.objects.get(article_number='БТ-010-42')
+        self.assertEqual(len(product.photo_urls()), 2)
+        with product.photo.open('rb') as f:
+            picture = Image.open(BytesIO(f.read()))
+        self.assertEqual(picture.format, 'JPEG')
+        self.assertEqual(picture.size, (900, 900))
+
+        # Витрина отдаёт ссылки на картинки, и они открываются
+        response = self.client.get('/api/shop/products/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('/media/products/photos/demo-', response.content.decode())
 
     def test_pages_open_on_demo_data(self):
         User.objects.create_superuser('admin', password='x')
