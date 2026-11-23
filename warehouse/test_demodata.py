@@ -116,23 +116,70 @@ class DemoDataTests(TestCase):
             run()
         self.assertEqual(Material.objects.count(), before)
 
-    def test_every_product_has_a_picture(self):
+    def test_every_product_has_a_photo(self):
         from PIL import Image
 
         run()
         self.assertFalse(Product.objects.filter(photo='').exists())
-        self.assertTrue(ProductPhoto.objects.exists())
-        product = Product.objects.get(article_number='БТ-010-42')
-        self.assertEqual(len(product.photo_urls()), 2)
-        with product.photo.open('rb') as f:
+        # Размеры одного цвета выглядят одинаково — обложка у них общая,
+        # а разные цвета показаны разными снимками
+        by_color = {}
+        for product in Product.objects.all():
+            by_color.setdefault((product.name, product.color),
+                                set()).add(product.photo.name)
+        for (name, color), files in by_color.items():
+            self.assertEqual(len(files), 1, (name, color))
+        for name in {name for name, _ in by_color}:
+            covers = [next(iter(files)) for (n, _), files in by_color.items()
+                      if n == name]
+            self.assertEqual(len(covers), len(set(covers)), name)
+
+        with Product.objects.first().photo.open('rb') as f:
             picture = Image.open(BytesIO(f.read()))
         self.assertEqual(picture.format, 'JPEG')
-        self.assertEqual(picture.size, (900, 900))
+        self.assertEqual(picture.width, picture.height)
 
-        # Витрина отдаёт ссылки на картинки, и они открываются
+        # Витрина отдаёт ссылки на снимки
         response = self.client.get('/api/shop/products/')
         self.assertEqual(response.status_code, 200)
-        self.assertIn('/media/products/photos/demo-', response.content.decode())
+        self.assertIn('/media/products/photos/demo-',
+                      response.content.decode())
+
+    def test_models_come_in_several_colors_and_sizes(self):
+        run()
+        shoes = Product.objects.filter(name='Кроссовки беговые «Темп»')
+        self.assertGreaterEqual(shoes.values('color').distinct().count(), 4)
+        self.assertGreaterEqual(shoes.values('size').distinct().count(), 6)
+        # Артикулы различают цвет и размер
+        self.assertEqual(shoes.values('article_number').distinct().count(),
+                         shoes.count())
+        # Не всё в наличии: часть размеров разобрана или не шилась
+        response = self.client.get('/api/shop/products/')
+        card = next(c for c in response.data['products']
+                    if c['name'] == 'Кроссовки беговые «Темп»')
+        variants = [v for c in card['colors'] for v in c['variants']]
+        self.assertTrue(any(v['available'] for v in variants))
+        self.assertTrue(any(not v['available'] for v in variants))
+
+    def test_every_photo_has_its_source_recorded(self):
+        """Снимки чужие: у каждого должны быть записаны автор и лицензия.
+
+        Лицензии CC BY и CC BY-SA разрешают брать снимок только с
+        указанием автора. Снимок, добавленный без записи в ИСТОЧНИКИ.md,
+        нарушал бы её.
+        """
+        from .management.commands.demodata import MODELS, PHOTOS_DIR
+
+        sources = (PHOTOS_DIR / 'ИСТОЧНИКИ.md').read_text(encoding='utf-8')
+        photos = sorted(PHOTOS_DIR.glob('*.jpg'))
+        self.assertTrue(photos)
+        for photo in photos:
+            self.assertIn(f'`{photo.name}`', sources, photo.name)
+        # И ни один цвет ни одной модели не остался без снимка
+        for model, spec in MODELS.items():
+            for code, _, _ in spec['colors']:
+                self.assertTrue((PHOTOS_DIR / f'{model}-{code}.jpg').exists(),
+                                f'{model}-{code}.jpg')
 
     def test_pages_open_on_demo_data(self):
         User.objects.create_superuser('admin', password='x')
