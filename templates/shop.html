@@ -771,7 +771,11 @@
                 const priceLabel = priceHtml(p.price_min, samePrice ? '' : 'от');
 
                 const colorsCount = p.colors.length;
-                const sizesCount = p.colors.reduce((s, c) => s + c.variants.length, 0);
+                // Размеров столько, сколько разных размеров, а не вариантов:
+                // у кроссовок в пяти цветах по семь размеров — семь, не 35
+                const sizesCount = new Set(p.colors.flatMap(
+                    c => c.variants.map(v => v.size))).size;
+                const variantsCount = p.colors.reduce((s, c) => s + c.variants.length, 0);
                 const chips = [];
                 if (colorsCount > 1) {
                     chips.push(`<span class="chip"><span class="n">${colorsCount}</span> ${plural(colorsCount, 'цвет', 'цвета', 'цветов')}</span>`);
@@ -786,7 +790,7 @@
 
                 // Кнопка на карточке: если вариант один — кладём сразу,
                 // если несколько — открываем карточку для выбора цвета/размера
-                const single = sizesCount === 1 ? p.colors[0].variants[0] : null;
+                const single = variantsCount === 1 ? p.colors[0].variants[0] : null;
                 const btnLabel = !p.available
                     ? 'Нет в наличии'
                     : (single

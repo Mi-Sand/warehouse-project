@@ -10,6 +10,8 @@
 Наличие показывается с учётом резерва: товар, обещанный другим заказам,
 недоступен к заказу, хотя физически ещё лежит на складе.
 """
+import re
+
 from django.conf import settings
 from django.db.models import DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
@@ -70,6 +72,29 @@ def client_address(request):
         if forwarded:
             return forwarded.split(',')[0].strip()[:45] or None
     return request.META.get('REMOTE_ADDR') or None
+
+
+# Буквенные размеры одежды по порядку, от меньшего к большему
+CLOTHING_SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '3XL',
+                  '4XL', '5XL']
+
+
+def size_order(size):
+    """Ключ, по которому размеры идут в списке выбора.
+
+    Сравнивать размеры как строки нельзя: «L» оказывалась раньше «M»,
+    а «S» — после обеих, и покупатель искал свой размер по всему списку.
+    Поэтому числовые размеры (обувь, диапазоны вроде «35–37» — по
+    первому числу) идут по возрастанию, буквенные — в порядке одежды,
+    всё прочее — по алфавиту в конце.
+    """
+    text = (size or '').strip().upper().replace(',', '.')
+    number = re.match(r'\d+(\.\d+)?', text)
+    if number:
+        return (0, float(number.group()), text)
+    if text in CLOTHING_SIZES:
+        return (1, CLOTHING_SIZES.index(text), text)
+    return (2, 0, text)
 
 
 @api_view(['GET'])
@@ -149,7 +174,8 @@ def shop_products(request):
         cover_photo = None
         any_available = False
         for c in g['colors'].values():
-            variants = sorted(c['variants'], key=lambda v: v['size'])
+            variants = sorted(c['variants'],
+                              key=lambda v: size_order(v['size']))
             colors.append({'color': c['color'], 'variants': variants})
             for v in variants:
                 all_prices.append(v['price'])
