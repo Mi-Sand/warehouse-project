@@ -29,6 +29,7 @@
 from contextlib import contextmanager
 from datetime import datetime, time, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
@@ -134,14 +135,24 @@ PRODUCTS = {
                'Снята с производства, остатки распродаются.'),
 }
 
-# Что нарисовать для товара и сколько ракурсов: у обуви, одежды и сумки
-# второй снимок есть, чтобы в карточке на витрине была галерея
+# Снимки товаров лежат в warehouse/demo_photos под именем модели:
+# temp-1.jpg, temp-2.jpg… Размеры одной модели выглядят одинаково, и
+# снимок у них общий. Откуда взят каждый снимок и на каких условиях —
+# в ИСТОЧНИКИ.md рядом с ними.
+#
+# Если снимка модели нет, картинка рисуется (warehouse/demo_images.py):
+# что рисовать и сколько ракурсов.
+PHOTOS_DIR = Path(__file__).resolve().parents[2] / 'demo_photos'
+
 PICTURES = {
-    'run41': ('sneaker', 2), 'run42': ('sneaker', 2), 'run43': ('sneaker', 2),
-    'boot40': ('boot', 2), 'boot42': ('boot', 2),
-    'hoodieM': ('hoodie', 2), 'hoodieL': ('hoodie', 2), 'bag': ('bag', 2),
-    'insole': ('insoles', 1), 'mat': ('mat', 1), 'oldrun': ('sneaker', 1),
+    'run41': ('temp', 'sneaker', 2), 'run42': ('temp', 'sneaker', 2),
+    'run43': ('temp', 'sneaker', 2),
+    'boot40': ('sever', 'boot', 2), 'boot42': ('sever', 'boot', 2),
+    'hoodieM': ('hoodie', 'hoodie', 2), 'hoodieL': ('hoodie', 'hoodie', 2),
+    'bag': ('bag', 'bag', 2), 'insole': ('insole', 'insoles', 1),
+    'mat': ('mat', 'mat', 1), 'oldrun': ('start', 'sneaker', 1),
 }
+
 
 COUNTERPARTIES = {
     'sport': ('ООО «Спорт-Регион»', '5007045678', '500701001',
@@ -402,25 +413,29 @@ class Command(BaseCommand):
     def pictures(self):
         """Обложка и дополнительные ракурсы для каждого товара.
 
-        Одинаковые товары разных размеров рисуются одинаково — у
-        настоящих снимков было бы так же. Рисунок готовится один раз на
-        модель и цвет, а не на каждый размер.
+        Берутся снимки модели из demo_photos, а если их нет — рисунок.
+        Каждая картинка готовится один раз на модель, а не на размер.
         """
-        drawn = {}
+        ready = {}
         for key, product in self.prod.items():
-            kind, views = PICTURES[key]
-            for view in range(views):
-                look = (kind, product.color, view)
-                if look not in drawn:
-                    drawn[look] = render(*look)
-                name = f'demo-{key}-{view + 1}.jpg'
+            model, kind, views = PICTURES[key]
+            if model not in ready:
+                ready[model] = self.model_pictures(
+                    model, kind, views, product.color)
+            for view, content in enumerate(ready[model]):
+                name = f'demo-{model}-{view + 1}.jpg'
                 if view == 0:
-                    product.photo.save(name, ContentFile(drawn[look]),
-                                       save=True)
+                    product.photo.save(name, ContentFile(content), save=True)
                 else:
                     extra = ProductPhoto(product=product, sort_order=view)
-                    extra.image.save(name, ContentFile(drawn[look]),
-                                     save=True)
+                    extra.image.save(name, ContentFile(content), save=True)
+
+    @staticmethod
+    def model_pictures(model, kind, views, color):
+        photos = sorted(PHOTOS_DIR.glob(f'{model}-*.jpg'))
+        if photos:
+            return [photo.read_bytes() for photo in photos]
+        return [render(kind, color, view) for view in range(views)]
 
     def inbound(self, number, ago, supplier, warehouse, rows, post=True):
         doc = InboundDocument.objects.create(
