@@ -86,6 +86,30 @@
         header h1 { font-size: 19px; font-weight: 640; letter-spacing: -.02em; margin-top: 2px; }
         header .sub { color: #94A9B8; font-size: 12.5px; margin-top: 2px; }
 
+        /* --- Сжатая шапка ------------------------------------------------
+           Целиком шапка занимает около двухсот пикселей, и прилипшая к
+           верху она закрывала заметную часть витрины. При прокрутке вниз
+           она сжимается до полосы: марка, название фирмы, корзина и меню
+           разделов остаются под рукой, заголовок и подзаголовок уходят.
+           У верха страницы шапка разворачивается обратно. */
+        .head-row, .brand-mark, .nav a { transition: padding .18s, width .18s, height .18s; }
+        header h1, header .sub {
+            max-height: 3em; overflow: hidden;
+            transition: max-height .18s, opacity .18s, margin .18s;
+        }
+        .site-head.compact .head-row { padding-block: 7px; }
+        .site-head.compact header h1,
+        .site-head.compact header .sub { max-height: 0; opacity: 0; margin-top: 0; }
+        .site-head.compact .brand-mark { width: 32px; height: 32px; }
+        .site-head.compact header .eyebrow {
+            font-family: var(--sans); font-size: 15px; font-weight: 620;
+            letter-spacing: -.01em; text-transform: none; color: #fff;
+        }
+        .site-head.compact .eyebrow .where { display: none; }
+        .site-head.compact .cart-btn { padding-block: 6px; }
+        .site-head.compact .nav a { padding-block: 8px; }
+        .site-head.compact { box-shadow: 0 2px 12px rgba(15, 23, 32, .25); }
+
         /* --- Меню разделов ---------------------------------------------- */
         .nav {
             border-top: 1px solid rgba(255,255,255,.1);
@@ -305,6 +329,16 @@
             .foot-item { margin-bottom: 10px; }
             .cart-btn { min-height: 42px; }
             .brand { padding: 5px 0; }
+            /* Сжатая шапка на телефоне: заголовка здесь и так нет, место
+               отнимает меню в две строки. Ужимаем его строки и убираем
+               значки — подписей разделов достаточно. */
+            .site-head.compact .head-row { padding-block: 5px; }
+            .site-head.compact .brand { padding: 0; }
+            .site-head.compact .cart-btn { min-height: 36px; padding-block: 4px; }
+            .site-head.compact .nav a {
+                min-height: 32px; padding-block: 5px; font-size: 12.5px;
+            }
+            .site-head.compact .nav a .ic { display: none; }
             .page { padding-block: 20px 36px; }
             .page-head h2 { font-size: 22px; }
             .panel { padding: 17px; }
@@ -414,6 +448,27 @@
             </div>
         </div>
     </footer>
+    <script>
+    // Сжатие шапки при прокрутке. Порог у сжатия и разворота разный:
+    // сжатая шапка ниже, страница под ней поднимается, и с одним порогом
+    // шапка дёргалась бы туда-обратно, когда прокрутка стоит рядом с ним.
+    (function () {
+        const head = document.querySelector('.site-head');
+        if (!head) return;
+        const COLLAPSE_AT = 140, EXPAND_AT = 30;
+        let pending = false;
+        function update() {
+            pending = false;
+            const y = window.scrollY;
+            if (y > COLLAPSE_AT) head.classList.add('compact');
+            else if (y < EXPAND_AT) head.classList.remove('compact');
+        }
+        window.addEventListener('scroll', function () {
+            if (!pending) { pending = true; requestAnimationFrame(update); }
+        }, { passive: true });
+        update();
+    })();
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
